@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
@@ -8,15 +10,32 @@ use std::{
  * MESSAGE LAND
  */
 
-struct MessageChannel {
+#[async_trait]
+trait MessageChannel {
+    fn push_msg(&mut self, msg: Message);
+    async fn get_message(&mut self) -> Message;
+}
+
+struct InAndOutMessageChannel {
     queue: VecDeque<Message>,
 }
 
-impl MessageChannel {
-    fn new() -> MessageChannel {
-        MessageChannel {
+impl InAndOutMessageChannel {
+    fn new() -> InAndOutMessageChannel {
+        InAndOutMessageChannel {
             queue: VecDeque::new(),
         }
+    }
+}
+
+#[async_trait]
+impl MessageChannel for InAndOutMessageChannel {
+    fn push_msg(&mut self, msg: Message) {
+        self.queue.push_back(msg);
+    }
+
+    async fn get_message(&mut self) -> Message {
+        unimplemented!()
     }
 }
 
@@ -43,7 +62,7 @@ trait MessageReceiver {
 }
 
 struct MessageEndpoint {
-    channel: MessageChannel,
+    channel: InAndOutMessageChannel,
     kindReceivers: HashMap<String, Rc<RefCell<dyn MessageReceiver>>>,
     idReceivers: HashMap<String, Rc<RefCell<dyn MessageReceiver>>>,
 }
@@ -51,7 +70,7 @@ struct MessageEndpoint {
 impl MessageEndpoint {
     fn new() -> MessageEndpoint {
         MessageEndpoint {
-            channel: MessageChannel::new(),
+            channel: InAndOutMessageChannel::new(),
             kindReceivers: HashMap::new(),
             idReceivers: HashMap::new(),
         }
@@ -63,7 +82,12 @@ impl MessageEndpoint {
 
     fn set_target(&mut self, target: MessageTarget, receiver: Rc<RefCell<dyn MessageReceiver>>) {
         match target {
-            MessageTarget::Id(id) => unimplemented!(),
+            MessageTarget::Id(id) => {
+                self.idReceivers.insert(id, receiver);
+            }
+            MessageTarget::Kind(kind) => {
+                self.kindReceivers.insert(kind, receiver);
+            }
         }
     }
 }
