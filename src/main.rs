@@ -62,7 +62,9 @@ impl MessageEndpoint {
     }
 
     fn set_target(&mut self, target: MessageTarget, receiver: Rc<RefCell<dyn MessageReceiver>>) {
-        unimplemented!()
+        match target {
+            MessageTarget::Id(id) => unimplemented!(),
+        }
     }
 }
 
@@ -114,6 +116,4 @@ impl MessageReceiver for Reporter {
  * INIT LAND
  */
 
-fn main() {
-    println!("Hello, world!");
-}
+fn main() {}
