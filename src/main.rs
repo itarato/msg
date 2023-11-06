@@ -1,19 +1,17 @@
-use async_trait::async_trait;
-
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
     rc::Rc,
+    sync::{Arc, Mutex},
+    thread,
 };
 
 /**
  * MESSAGE LAND
  */
 
-#[async_trait]
 trait MessageChannel {
     fn push_msg(&mut self, msg: Message);
-    async fn get_message(&mut self) -> Message;
 }
 
 struct InAndOutMessageChannel {
@@ -28,14 +26,9 @@ impl InAndOutMessageChannel {
     }
 }
 
-#[async_trait]
 impl MessageChannel for InAndOutMessageChannel {
     fn push_msg(&mut self, msg: Message) {
         self.queue.push_back(msg);
-    }
-
-    async fn get_message(&mut self) -> Message {
-        unimplemented!()
     }
 }
 
@@ -90,6 +83,8 @@ impl MessageEndpoint {
             }
         }
     }
+
+    fn loop_thread(&mut self) {}
 }
 
 /**
@@ -140,4 +135,14 @@ impl MessageReceiver for Reporter {
  * INIT LAND
  */
 
-fn main() {}
+fn main() {
+    let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new()));
+
+    let thread_msg_endpoint = msg_endpoint.clone();
+
+    let msg_loop = thread::spawn(move || {
+        thread_msg_endpoint.lock().loop_thread();
+    });
+
+    msg_loop.join();
+}
