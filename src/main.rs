@@ -196,7 +196,6 @@ fn main() {
     let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new(rcv)));
 
     let thread_msg_endpoint = msg_endpoint.clone();
-
     let msg_loop = thread::spawn(move || {
         thread_msg_endpoint.lock().unwrap().loop_thread();
     });
@@ -206,7 +205,7 @@ fn main() {
     info!("Setting up interactors");
 
     let mut user_ctrl = UserController::new(msg_endpoint.clone());
-    let mut _reporter = Reporter::new(msg_endpoint.clone());
+    Reporter::new(msg_endpoint.clone());
 
     info!("Trigger message creation");
 
