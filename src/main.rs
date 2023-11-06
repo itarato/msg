@@ -1,3 +1,7 @@
+extern crate pretty_env_logger;
+#[macro_use]
+extern crate log;
+
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -32,7 +36,7 @@ impl InAndOutMessageChannel {
 
 impl MessageChannel for InAndOutMessageChannel {
     fn push_msg(&mut self, msg: Message) {
-        println!("CHANNEL -> message received");
+        info!("[channel] Message received");
         self.queue.push_back(msg);
     }
 
@@ -87,7 +91,7 @@ impl MessageEndpoint {
     }
 
     fn send(&mut self, msg: Message) {
-        println!("MSG_ENDPOINT -> enqueue message");
+        info!("[endpoint] new message arrived");
         self.channel.push_msg(msg);
     }
 
@@ -113,7 +117,8 @@ impl MessageEndpoint {
     fn loop_thread(&mut self) {
         loop {
             if let Some(msg) = self.channel.get_msg() {
-                println!("MSG_ENDPOINT -> message found");
+                info!("[endpoint] [loop] new message is being transferred");
+
                 match msg.target.clone() {
                     MessageTarget::Id(id) => unimplemented!(),
                     MessageTarget::Kind(kind) => {
@@ -170,6 +175,8 @@ impl Reporter {
 
 impl MessageReceiver for Reporter {
     fn on_message(&mut self, msg: Message) {
+        info!("Message arrived in user land");
+
         println!("Reporter got a message: {:#?}", msg);
     }
 }
@@ -179,6 +186,12 @@ impl MessageReceiver for Reporter {
  */
 
 fn main() {
+    pretty_env_logger::init();
+
+    info!("Experiment start");
+
+    info!("Setting up messaging components");
+
     let (snd, rcv) = mpsc::channel();
     let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new(rcv)));
 
@@ -190,19 +203,24 @@ fn main() {
 
     // ACTION START
 
+    info!("Setting up interactors");
+
     let mut user_ctrl = UserController::new(msg_endpoint.clone());
     let mut _reporter = Reporter::new(msg_endpoint.clone());
 
+    info!("Trigger message creation");
+
     user_ctrl.save_user();
 
+    info!("Artificial sleep");
     thread::sleep(time::Duration::from_millis(10));
 
     // ACTION END
 
-    println!("MAIN -> STOP");
+    info!("Send QUIT command to message endpoint");
     snd.send(MessageEndpointSignal::Quit)
         .expect("mpsc command sent");
-    println!("MAIN -> STOP COMPLETED");
 
+    info!("Wait for message loop thread to finish");
     msg_loop.join().expect("msg loop thread joins");
 }
