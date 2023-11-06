@@ -2,9 +2,11 @@ use std::{
     collections::{HashMap, VecDeque},
     sync::{
         atomic::{self, AtomicBool},
+        mpsc::{self, Receiver},
         Arc, Mutex,
     },
-    thread, time,
+    thread,
+    time::{self, Duration},
 };
 
 /**
@@ -35,7 +37,6 @@ impl MessageChannel for InAndOutMessageChannel {
     }
 
     fn get_msg(&mut self) -> Option<Message> {
-        println!("CHANNEL -> message popped");
         self.queue.pop_front()
     }
 }
@@ -62,20 +63,26 @@ trait MessageReceiver {
     fn on_message(&mut self, msg: Message);
 }
 
+enum MessageEndpointSignal {
+    Quit,
+}
+
 struct MessageEndpoint {
     channel: InAndOutMessageChannel,
     kind_receivers: HashMap<String, Arc<Mutex<dyn MessageReceiver + Send>>>,
     id_receivers: HashMap<String, Arc<Mutex<dyn MessageReceiver + Send>>>,
     is_running: AtomicBool,
+    rcv: Receiver<MessageEndpointSignal>,
 }
 
 impl MessageEndpoint {
-    fn new() -> MessageEndpoint {
+    fn new(rcv: Receiver<MessageEndpointSignal>) -> MessageEndpoint {
         MessageEndpoint {
             channel: InAndOutMessageChannel::new(),
             kind_receivers: HashMap::new(),
             id_receivers: HashMap::new(),
             is_running: AtomicBool::new(true),
+            rcv,
         }
     }
 
@@ -104,12 +111,7 @@ impl MessageEndpoint {
     }
 
     fn loop_thread(&mut self) {
-        while self.is_running.load(atomic::Ordering::SeqCst) {
-            println!(
-                "MSG_ENDPOINT -> is running: {}",
-                self.is_running.load(atomic::Ordering::SeqCst)
-            );
-
+        loop {
             if let Some(msg) = self.channel.get_msg() {
                 println!("MSG_ENDPOINT -> message found");
                 match msg.target.clone() {
@@ -121,6 +123,11 @@ impl MessageEndpoint {
                     }
                 }
             }
+
+            match self.rcv.recv_timeout(Duration::from_nanos(1)) {
+                Ok(MessageEndpointSignal::Quit) => break,
+                _ => {}
+            };
         }
     }
 }
@@ -172,7 +179,8 @@ impl MessageReceiver for Reporter {
  */
 
 fn main() {
-    let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new()));
+    let (snd, rcv) = mpsc::channel();
+    let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new(rcv)));
 
     let thread_msg_endpoint = msg_endpoint.clone();
 
@@ -187,11 +195,14 @@ fn main() {
 
     user_ctrl.save_user();
 
-    thread::sleep(time::Duration::from_nanos(1));
+    thread::sleep(time::Duration::from_millis(10));
 
     // ACTION END
 
     println!("MAIN -> STOP");
-    msg_endpoint.lock().unwrap().stop();
+    snd.send(MessageEndpointSignal::Quit)
+        .expect("mpsc command sent");
+    println!("MAIN -> STOP COMPLETED");
+
     msg_loop.join().expect("msg loop thread joins");
 }
