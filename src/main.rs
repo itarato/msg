@@ -1,9 +1,10 @@
 use std::{
-    cell::RefCell,
     collections::{HashMap, VecDeque},
-    rc::Rc,
-    sync::{Arc, Mutex},
-    thread,
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc, Mutex,
+    },
+    thread, time,
 };
 
 /**
@@ -12,6 +13,7 @@ use std::{
 
 trait MessageChannel {
     fn push_msg(&mut self, msg: Message);
+    fn get_msg(&mut self) -> Option<Message>;
 }
 
 struct InAndOutMessageChannel {
@@ -28,17 +30,23 @@ impl InAndOutMessageChannel {
 
 impl MessageChannel for InAndOutMessageChannel {
     fn push_msg(&mut self, msg: Message) {
+        println!("CHANNEL -> message received");
         self.queue.push_back(msg);
+    }
+
+    fn get_msg(&mut self) -> Option<Message> {
+        println!("CHANNEL -> message popped");
+        self.queue.pop_front()
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum MessageTarget {
     Kind(String),
     Id(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Message {
     content: Vec<u8>,
     target: MessageTarget,
@@ -56,35 +64,65 @@ trait MessageReceiver {
 
 struct MessageEndpoint {
     channel: InAndOutMessageChannel,
-    kindReceivers: HashMap<String, Rc<RefCell<dyn MessageReceiver>>>,
-    idReceivers: HashMap<String, Rc<RefCell<dyn MessageReceiver>>>,
+    kind_receivers: HashMap<String, Arc<Mutex<dyn MessageReceiver + Send>>>,
+    id_receivers: HashMap<String, Arc<Mutex<dyn MessageReceiver + Send>>>,
+    is_running: AtomicBool,
 }
 
 impl MessageEndpoint {
     fn new() -> MessageEndpoint {
         MessageEndpoint {
             channel: InAndOutMessageChannel::new(),
-            kindReceivers: HashMap::new(),
-            idReceivers: HashMap::new(),
+            kind_receivers: HashMap::new(),
+            id_receivers: HashMap::new(),
+            is_running: AtomicBool::new(true),
         }
     }
 
     fn send(&mut self, msg: Message) {
-        unimplemented!()
+        println!("MSG_ENDPOINT -> enqueue message");
+        self.channel.push_msg(msg);
     }
 
-    fn set_target(&mut self, target: MessageTarget, receiver: Rc<RefCell<dyn MessageReceiver>>) {
+    fn stop(&mut self) {
+        self.is_running.store(false, atomic::Ordering::SeqCst);
+    }
+
+    fn set_target(
+        &mut self,
+        target: MessageTarget,
+        receiver: Arc<Mutex<dyn MessageReceiver + Send>>,
+    ) {
         match target {
             MessageTarget::Id(id) => {
-                self.idReceivers.insert(id, receiver);
+                self.id_receivers.insert(id, receiver);
             }
             MessageTarget::Kind(kind) => {
-                self.kindReceivers.insert(kind, receiver);
+                self.kind_receivers.insert(kind, receiver);
             }
         }
     }
 
-    fn loop_thread(&mut self) {}
+    fn loop_thread(&mut self) {
+        while self.is_running.load(atomic::Ordering::SeqCst) {
+            println!(
+                "MSG_ENDPOINT -> is running: {}",
+                self.is_running.load(atomic::Ordering::SeqCst)
+            );
+
+            if let Some(msg) = self.channel.get_msg() {
+                println!("MSG_ENDPOINT -> message found");
+                match msg.target.clone() {
+                    MessageTarget::Id(id) => unimplemented!(),
+                    MessageTarget::Kind(kind) => {
+                        if let Some(receiver) = self.kind_receivers.get(&kind) {
+                            receiver.lock().unwrap().on_message(msg);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -92,37 +130,35 @@ impl MessageEndpoint {
  */
 
 struct UserController {
-    msg_endpoint: MessageEndpoint,
+    msg_endpoint: Arc<Mutex<MessageEndpoint>>,
 }
 
 impl UserController {
-    fn new(msg_endpoint: MessageEndpoint) -> UserController {
+    fn new(msg_endpoint: Arc<Mutex<MessageEndpoint>>) -> UserController {
         UserController { msg_endpoint }
     }
 
     fn save_user(&mut self) {
-        self.msg_endpoint.send(Message::new(
+        self.msg_endpoint.lock().unwrap().send(Message::new(
             vec![0, 1, 2, 3, 4],
             MessageTarget::Kind("report".into()),
         ));
     }
 }
 
-struct Reporter {
-    msg_endpoint: MessageEndpoint,
-}
+struct Reporter;
 
 impl Reporter {
-    fn new(msg_endpoint: MessageEndpoint) -> Rc<RefCell<Reporter>> {
-        let reporter = Rc::new(RefCell::new(Reporter { msg_endpoint }));
-        reporter
-            .borrow_mut()
-            .msg_endpoint
+    fn new(msg_endpoint: Arc<Mutex<MessageEndpoint>>) -> Arc<Mutex<Reporter>> {
+        let reporter = Arc::new(Mutex::new(Reporter {}));
+
+        msg_endpoint
+            .lock()
+            .unwrap()
             .set_target(MessageTarget::Kind("report".into()), reporter.clone());
+
         reporter
     }
-
-    fn make_report() {}
 }
 
 impl MessageReceiver for Reporter {
@@ -141,8 +177,21 @@ fn main() {
     let thread_msg_endpoint = msg_endpoint.clone();
 
     let msg_loop = thread::spawn(move || {
-        thread_msg_endpoint.lock().loop_thread();
+        thread_msg_endpoint.lock().unwrap().loop_thread();
     });
 
-    msg_loop.join();
+    // ACTION START
+
+    let mut user_ctrl = UserController::new(msg_endpoint.clone());
+    let mut _reporter = Reporter::new(msg_endpoint.clone());
+
+    user_ctrl.save_user();
+
+    thread::sleep(time::Duration::from_nanos(1));
+
+    // ACTION END
+
+    println!("MAIN -> STOP");
+    msg_endpoint.lock().unwrap().stop();
+    msg_loop.join().expect("msg loop thread joins");
 }
