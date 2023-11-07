@@ -72,7 +72,7 @@ enum MessageEndpointSignal {
 
 struct MessageEndpoint {
     channel: InAndOutMessageChannel,
-    receivers: HashMap<MessageTarget, Arc<Mutex<dyn MessageReceiver + Send>>>,
+    receivers: HashMap<MessageTarget, Vec<Arc<Mutex<dyn MessageReceiver + Send>>>>,
     rcv: Receiver<MessageEndpointSignal>,
 }
 
@@ -95,15 +95,20 @@ impl MessageEndpoint {
         target: MessageTarget,
         receiver: Arc<Mutex<dyn MessageReceiver + Send>>,
     ) {
-        self.receivers.insert(target, receiver);
+        self.receivers
+            .entry(target)
+            .or_insert(vec![])
+            .push(receiver);
     }
 
     fn loop_thread(&mut self) {
         loop {
             if let Some(msg) = self.channel.get_msg() {
                 info!("[endpoint] [loop] new message is being transferred");
-                if let Some(receiver) = self.receivers.get(&msg.target) {
-                    receiver.lock().unwrap().on_message(msg);
+                if let Some(receivers) = self.receivers.get(&msg.target) {
+                    for receiver in receivers {
+                        receiver.lock().unwrap().on_message(msg.clone());
+                    }
                 }
             }
 
