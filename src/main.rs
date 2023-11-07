@@ -5,7 +5,6 @@ extern crate log;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        atomic::{self, AtomicBool},
         mpsc::{self, Receiver},
         Arc, Mutex,
     },
@@ -45,7 +44,7 @@ impl MessageChannel for InAndOutMessageChannel {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum MessageTarget {
     Kind(String),
     Id(String),
@@ -73,9 +72,7 @@ enum MessageEndpointSignal {
 
 struct MessageEndpoint {
     channel: InAndOutMessageChannel,
-    kind_receivers: HashMap<String, Arc<Mutex<dyn MessageReceiver + Send>>>,
-    id_receivers: HashMap<String, Arc<Mutex<dyn MessageReceiver + Send>>>,
-    is_running: AtomicBool,
+    receivers: HashMap<MessageTarget, Arc<Mutex<dyn MessageReceiver + Send>>>,
     rcv: Receiver<MessageEndpointSignal>,
 }
 
@@ -83,9 +80,7 @@ impl MessageEndpoint {
     fn new(rcv: Receiver<MessageEndpointSignal>) -> MessageEndpoint {
         MessageEndpoint {
             channel: InAndOutMessageChannel::new(),
-            kind_receivers: HashMap::new(),
-            id_receivers: HashMap::new(),
-            is_running: AtomicBool::new(true),
+            receivers: HashMap::new(),
             rcv,
         }
     }
@@ -95,37 +90,20 @@ impl MessageEndpoint {
         self.channel.push_msg(msg);
     }
 
-    fn stop(&mut self) {
-        self.is_running.store(false, atomic::Ordering::SeqCst);
-    }
-
     fn set_target(
         &mut self,
         target: MessageTarget,
         receiver: Arc<Mutex<dyn MessageReceiver + Send>>,
     ) {
-        match target {
-            MessageTarget::Id(id) => {
-                self.id_receivers.insert(id, receiver);
-            }
-            MessageTarget::Kind(kind) => {
-                self.kind_receivers.insert(kind, receiver);
-            }
-        }
+        self.receivers.insert(target, receiver);
     }
 
     fn loop_thread(&mut self) {
         loop {
             if let Some(msg) = self.channel.get_msg() {
                 info!("[endpoint] [loop] new message is being transferred");
-
-                match msg.target.clone() {
-                    MessageTarget::Id(id) => unimplemented!(),
-                    MessageTarget::Kind(kind) => {
-                        if let Some(receiver) = self.kind_receivers.get(&kind) {
-                            receiver.lock().unwrap().on_message(msg);
-                        }
-                    }
+                if let Some(receiver) = self.receivers.get(&msg.target) {
+                    receiver.lock().unwrap().on_message(msg);
                 }
             }
 
