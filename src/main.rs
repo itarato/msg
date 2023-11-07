@@ -77,9 +77,12 @@ struct MessageEndpoint {
 }
 
 impl MessageEndpoint {
-    fn new(rcv: Receiver<MessageEndpointSignal>) -> MessageEndpoint {
+    fn new(
+        channel: Box<dyn MessageChannel + Send>,
+        rcv: Receiver<MessageEndpointSignal>,
+    ) -> MessageEndpoint {
         MessageEndpoint {
-            channel: Box::new(InAndOutMessageChannel::new()),
+            channel,
             receivers: HashMap::new(),
             rcv,
         }
@@ -176,7 +179,10 @@ fn main() {
     info!("Setting up messaging components");
 
     let (snd, rcv) = mpsc::channel();
-    let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new(rcv)));
+    let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new(
+        Box::new(InAndOutMessageChannel::new()),
+        rcv,
+    )));
 
     let thread_msg_endpoint = msg_endpoint.clone();
     let msg_loop = thread::spawn(move || {
