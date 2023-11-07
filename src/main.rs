@@ -68,6 +68,8 @@ impl MessageChannel for TransformerListChannel {
         match self.queue.pop_front() {
             Some(msg) => {
                 let mut new_msg = msg;
+
+                // TODO: MAKE THIS ASYNC!!!
                 for transformer in &mut self.transformers {
                     new_msg = transformer.transform(new_msg);
                 }
