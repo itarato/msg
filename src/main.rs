@@ -71,7 +71,7 @@ enum MessageEndpointSignal {
 }
 
 struct MessageEndpoint {
-    channel: InAndOutMessageChannel,
+    channel: Box<dyn MessageChannel + Send>,
     receivers: HashMap<MessageTarget, Vec<Arc<Mutex<dyn MessageReceiver + Send>>>>,
     rcv: Receiver<MessageEndpointSignal>,
 }
@@ -79,7 +79,7 @@ struct MessageEndpoint {
 impl MessageEndpoint {
     fn new(rcv: Receiver<MessageEndpointSignal>) -> MessageEndpoint {
         MessageEndpoint {
-            channel: InAndOutMessageChannel::new(),
+            channel: Box::new(InAndOutMessageChannel::new()),
             receivers: HashMap::new(),
             rcv,
         }
@@ -188,6 +188,7 @@ fn main() {
     info!("Setting up interactors");
 
     let mut user_ctrl = UserController::new(msg_endpoint.clone());
+    Reporter::new(msg_endpoint.clone());
     Reporter::new(msg_endpoint.clone());
 
     info!("Trigger message creation");
