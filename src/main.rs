@@ -161,6 +161,7 @@ impl MessageEndpoint {
 
     fn loop_thread(&mut self) {
         loop {
+            // TODO: MAKE THIS A NOT-BUSY-LOOP
             if let Some(msg) = self.channel.get_msg() {
                 info!("[endpoint] [loop] new message is being transferred");
                 if let Some(receivers) = self.receivers.get(&msg.target) {
@@ -197,6 +198,8 @@ impl UserController {
             MessageTarget::Kind("report".into()),
         ));
     }
+
+    fn fake_mutation(&mut self) {}
 }
 
 struct Reporter;
@@ -205,6 +208,8 @@ impl Reporter {
     fn new() -> Reporter {
         Reporter {}
     }
+
+    fn fake_mutation(&mut self) {}
 }
 
 impl MessageReceiver for Reporter {
@@ -242,17 +247,20 @@ fn main() {
 
     let mut user_ctrl = UserController::new(msg_endpoint.clone());
 
-    let reporter1 = Reporter::new();
+    let reporter1 = Arc::new(Mutex::new(Reporter::new()));
     let reporter2 = Reporter::new();
 
-    msg_endpoint.lock().unwrap().set_target(
-        MessageTarget::Kind("report".into()),
-        Arc::new(Mutex::new(reporter1)),
-    );
+    msg_endpoint
+        .lock()
+        .unwrap()
+        .set_target(MessageTarget::Kind("report".into()), reporter1.clone());
     msg_endpoint.lock().unwrap().set_target(
         MessageTarget::Kind("report".into()),
         Arc::new(Mutex::new(reporter2)),
     );
+
+    user_ctrl.fake_mutation();
+    reporter1.lock().unwrap().fake_mutation();
 
     info!("Trigger message creation");
 
