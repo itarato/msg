@@ -147,15 +147,8 @@ impl UserController {
 struct Reporter;
 
 impl Reporter {
-    fn new(msg_endpoint: Arc<Mutex<MessageEndpoint>>) -> Arc<Mutex<Reporter>> {
-        let reporter = Arc::new(Mutex::new(Reporter {}));
-
-        msg_endpoint
-            .lock()
-            .unwrap()
-            .set_target(MessageTarget::Kind("report".into()), reporter.clone());
-
-        reporter
+    fn new() -> Reporter {
+        Reporter {}
     }
 }
 
@@ -194,8 +187,18 @@ fn main() {
     info!("Setting up interactors");
 
     let mut user_ctrl = UserController::new(msg_endpoint.clone());
-    Reporter::new(msg_endpoint.clone());
-    Reporter::new(msg_endpoint.clone());
+
+    let reporter1 = Reporter::new();
+    let reporter2 = Reporter::new();
+
+    msg_endpoint.lock().unwrap().set_target(
+        MessageTarget::Kind("report".into()),
+        Arc::new(Mutex::new(reporter1)),
+    );
+    msg_endpoint.lock().unwrap().set_target(
+        MessageTarget::Kind("report".into()),
+        Arc::new(Mutex::new(reporter2)),
+    );
 
     info!("Trigger message creation");
 
