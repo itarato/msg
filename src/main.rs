@@ -44,6 +44,40 @@ impl MessageChannel for InAndOutMessageChannel {
     }
 }
 
+struct TransformerListChannel {
+    transformers: Vec<Box<dyn MessageTransformer + Send>>,
+    queue: VecDeque<Message>,
+}
+
+impl TransformerListChannel {
+    fn new(transformers: Vec<Box<dyn MessageTransformer + Send>>) -> TransformerListChannel {
+        TransformerListChannel {
+            transformers,
+            queue: VecDeque::new(),
+        }
+    }
+}
+
+impl MessageChannel for TransformerListChannel {
+    fn push_msg(&mut self, msg: Message) {
+        info!("[transformer channel] Message received");
+        self.queue.push_back(msg);
+    }
+
+    fn get_msg(&mut self) -> Option<Message> {
+        match self.queue.pop_front() {
+            Some(msg) => {
+                let mut new_msg = msg;
+                for transformer in &mut self.transformers {
+                    new_msg = transformer.transform(new_msg);
+                }
+                Some(new_msg)
+            }
+            None => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum MessageTarget {
     Kind(String),
@@ -59,6 +93,25 @@ struct Message {
 impl Message {
     fn new(content: Vec<u8>, target: MessageTarget) -> Message {
         Message { content, target }
+    }
+}
+
+trait MessageTransformer {
+    fn transform(&mut self, msg: Message) -> Message;
+}
+
+struct MessageEncryptorTransformer;
+
+impl MessageEncryptorTransformer {
+    fn new() -> MessageEncryptorTransformer {
+        MessageEncryptorTransformer
+    }
+}
+
+impl MessageTransformer for MessageEncryptorTransformer {
+    fn transform(&mut self, msg: Message) -> Message {
+        let new_content = msg.content.iter().map(|c| c ^ 0xb0).collect();
+        Message::new(new_content, msg.target)
     }
 }
 
@@ -172,10 +225,9 @@ fn main() {
     info!("Setting up messaging components");
 
     let (snd, rcv) = mpsc::channel();
-    let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new(
-        Box::new(InAndOutMessageChannel::new()),
-        rcv,
-    )));
+    let channel = TransformerListChannel::new(vec![Box::new(MessageEncryptorTransformer::new())]);
+    // let channel = InAndOutMessageChannel::new();
+    let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new(Box::new(channel), rcv)));
 
     let thread_msg_endpoint = msg_endpoint.clone();
     let msg_loop = thread::spawn(move || {
