@@ -5,7 +5,7 @@ extern crate log;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        mpsc::{self, Receiver},
+        mpsc::{self, Receiver, Sender},
         Arc, Mutex,
     },
     thread,
@@ -44,39 +44,73 @@ impl MessageChannel for InAndOutMessageChannel {
     }
 }
 
-struct TransformerListChannel {
+struct TransformerWorker {
+    pending: Arc<Mutex<VecDeque<Message>>>,
+    done: Arc<Mutex<VecDeque<Message>>>,
     transformers: Vec<Box<dyn MessageTransformer + Send>>,
-    queue: VecDeque<Message>,
+    rcv: Receiver<MessageEndpointSignal>,
+}
+
+impl TransformerWorker {
+    fn new(
+        transformers: Vec<Box<dyn MessageTransformer + Send>>,
+        rcv: Receiver<MessageEndpointSignal>,
+        pending: Arc<Mutex<VecDeque<Message>>>,
+        done: Arc<Mutex<VecDeque<Message>>>,
+    ) -> TransformerWorker {
+        TransformerWorker {
+            pending,
+            done,
+            transformers,
+            rcv,
+        }
+    }
+
+    fn work_loop(&mut self) {
+        loop {
+            if let Some(mut msg) = self.pending.lock().unwrap().pop_front() {
+                for transformer in &mut self.transformers {
+                    msg = transformer.transform(msg);
+                }
+
+                {
+                    self.done
+                        .lock()
+                        .expect("Can lock done queue")
+                        .push_back(msg);
+                }
+            }
+
+            match self.rcv.recv_timeout(Duration::from_millis(10)) {
+                Ok(MessageEndpointSignal::Quit) => break,
+                _ => {}
+            };
+        }
+    }
+}
+
+struct TransformerListChannel {
+    pending: Arc<Mutex<VecDeque<Message>>>,
+    done: Arc<Mutex<VecDeque<Message>>>,
 }
 
 impl TransformerListChannel {
-    fn new(transformers: Vec<Box<dyn MessageTransformer + Send>>) -> TransformerListChannel {
-        TransformerListChannel {
-            transformers,
-            queue: VecDeque::new(),
-        }
+    fn new(
+        pending: Arc<Mutex<VecDeque<Message>>>,
+        done: Arc<Mutex<VecDeque<Message>>>,
+    ) -> TransformerListChannel {
+        TransformerListChannel { pending, done }
     }
 }
 
 impl MessageChannel for TransformerListChannel {
     fn push_msg(&mut self, msg: Message) {
-        info!("[transformer channel] Message received");
-        self.queue.push_back(msg);
+        info!("[transformer channel] Message received, sending for transformation");
+        self.pending.lock().unwrap().push_back(msg);
     }
 
     fn get_msg(&mut self) -> Option<Message> {
-        match self.queue.pop_front() {
-            Some(msg) => {
-                let mut new_msg = msg;
-
-                // TODO: MAKE THIS ASYNC!!!
-                for transformer in &mut self.transformers {
-                    new_msg = transformer.transform(new_msg);
-                }
-                Some(new_msg)
-            }
-            None => None,
-        }
+        self.done.lock().expect("Can lock queue").pop_front()
     }
 }
 
@@ -193,6 +227,7 @@ impl UserController {
     }
 
     fn save_user(&mut self) {
+        info!("[user ctrl] Sending message");
         self.msg_endpoint.lock().unwrap().send(Message::new(
             vec![0, 1, 2, 3, 4],
             MessageTarget::Kind("report".into()),
@@ -231,15 +266,29 @@ fn main() {
 
     info!("Setting up messaging components");
 
+    let (tf_wrk_snd, tf_wrk_rcv) = mpsc::channel();
+    let worker_input_queue = Arc::new(Mutex::new(VecDeque::new()));
+    let worker_output_queue = Arc::new(Mutex::new(VecDeque::new()));
+    let transform_worker = Arc::new(Mutex::new(TransformerWorker::new(
+        vec![Box::new(MessageEncryptorTransformer::new())],
+        tf_wrk_rcv,
+        worker_input_queue.clone(),
+        worker_output_queue.clone(),
+    )));
+
+    let transform_worker_thread = thread::spawn({
+        let worker = transform_worker.clone();
+        move || {
+            worker.lock().unwrap().work_loop();
+        }
+    });
+
     let (snd, rcv) = mpsc::channel();
-    let channel = TransformerListChannel::new(vec![Box::new(MessageEncryptorTransformer::new())]);
+    let channel = TransformerListChannel::new(worker_input_queue, worker_output_queue);
     // let channel = InAndOutMessageChannel::new();
     let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new(Box::new(channel), rcv)));
 
     let thread_msg_endpoint = msg_endpoint.clone();
-    let msg_loop = thread::spawn(move || {
-        thread_msg_endpoint.lock().unwrap().loop_thread();
-    });
 
     // ACTION START
 
@@ -267,14 +316,25 @@ fn main() {
     user_ctrl.save_user();
 
     info!("Artificial sleep");
-    thread::sleep(time::Duration::from_millis(10));
 
     // ACTION END
 
+    let msg_loop = thread::spawn(move || {
+        thread_msg_endpoint.lock().unwrap().loop_thread();
+    });
+
+    thread::sleep(time::Duration::from_millis(10));
+
     info!("Send QUIT command to message endpoint");
+    tf_wrk_snd
+        .send(MessageEndpointSignal::Quit)
+        .expect("worker thread stop command sent");
     snd.send(MessageEndpointSignal::Quit)
         .expect("mpsc command sent");
 
     info!("Wait for message loop thread to finish");
     msg_loop.join().expect("msg loop thread joins");
+    transform_worker_thread
+        .join()
+        .expect("worker thread joined");
 }
