@@ -285,7 +285,6 @@ fn main() {
 
     let (snd, rcv) = mpsc::channel();
     let channel = TransformerListChannel::new(worker_input_queue, worker_output_queue);
-    // let channel = InAndOutMessageChannel::new();
     let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new(Box::new(channel), rcv)));
 
     let thread_msg_endpoint = msg_endpoint.clone();
