@@ -5,6 +5,7 @@ extern crate log;
 mod channel;
 mod endpoint;
 mod message;
+mod non_block_deque;
 mod transformer;
 mod worker;
 
