@@ -5,7 +5,7 @@ extern crate log;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver},
         Arc, Mutex,
     },
     thread,
@@ -68,6 +68,7 @@ impl TransformerWorker {
 
     fn work_loop(&mut self) {
         loop {
+            // TODO: MAKE THIS A NON-BUSY LOOP
             if let Some(mut msg) = self.pending.lock().unwrap().pop_front() {
                 for transformer in &mut self.transformers {
                     msg = transformer.transform(msg);
