@@ -18,7 +18,6 @@ use crate::worker::*;
 
 use std::time::Duration;
 use std::{
-    collections::VecDeque,
     sync::{
         mpsc::{self},
         Arc, Mutex,

@@ -1,7 +1,4 @@
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
-};
+use std::{collections::VecDeque, sync::Arc};
 
 use crate::message::*;
 use crate::non_block_deque::*;
