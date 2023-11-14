@@ -2,217 +2,27 @@ extern crate pretty_env_logger;
 #[macro_use]
 extern crate log;
 
+mod channel;
+mod endpoint;
+mod message;
+mod transformer;
+mod worker;
+
+use crate::channel::*;
+use crate::endpoint::*;
+use crate::message::*;
+use crate::transformer::*;
+use crate::worker::*;
+
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     sync::{
-        mpsc::{self, Receiver},
+        mpsc::{self},
         Arc, Mutex,
     },
     thread,
-    time::{self, Duration},
+    time::{self},
 };
-
-/**
- * MESSAGE LAND
- */
-
-trait MessageChannel {
-    fn push_msg(&mut self, msg: Message);
-    fn get_msg(&mut self) -> Option<Message>;
-}
-
-struct InAndOutMessageChannel {
-    queue: VecDeque<Message>,
-}
-
-impl InAndOutMessageChannel {
-    fn new() -> InAndOutMessageChannel {
-        InAndOutMessageChannel {
-            queue: VecDeque::new(),
-        }
-    }
-}
-
-impl MessageChannel for InAndOutMessageChannel {
-    fn push_msg(&mut self, msg: Message) {
-        info!("[channel] Message received");
-        self.queue.push_back(msg);
-    }
-
-    fn get_msg(&mut self) -> Option<Message> {
-        self.queue.pop_front()
-    }
-}
-
-struct TransformerWorker {
-    pending: Arc<Mutex<VecDeque<Message>>>,
-    done: Arc<Mutex<VecDeque<Message>>>,
-    transformers: Vec<Box<dyn MessageTransformer + Send>>,
-    rcv: Receiver<MessageEndpointSignal>,
-}
-
-impl TransformerWorker {
-    fn new(
-        transformers: Vec<Box<dyn MessageTransformer + Send>>,
-        rcv: Receiver<MessageEndpointSignal>,
-        pending: Arc<Mutex<VecDeque<Message>>>,
-        done: Arc<Mutex<VecDeque<Message>>>,
-    ) -> TransformerWorker {
-        TransformerWorker {
-            pending,
-            done,
-            transformers,
-            rcv,
-        }
-    }
-
-    fn work_loop(&mut self) {
-        loop {
-            // TODO: MAKE THIS A NON-BUSY LOOP
-            if let Some(mut msg) = self.pending.lock().unwrap().pop_front() {
-                for transformer in &mut self.transformers {
-                    msg = transformer.transform(msg);
-                }
-
-                {
-                    self.done
-                        .lock()
-                        .expect("Can lock done queue")
-                        .push_back(msg);
-                }
-            }
-
-            match self.rcv.recv_timeout(Duration::from_millis(10)) {
-                Ok(MessageEndpointSignal::Quit) => break,
-                _ => {}
-            };
-        }
-    }
-}
-
-struct TransformerListChannel {
-    pending: Arc<Mutex<VecDeque<Message>>>,
-    done: Arc<Mutex<VecDeque<Message>>>,
-}
-
-impl TransformerListChannel {
-    fn new(
-        pending: Arc<Mutex<VecDeque<Message>>>,
-        done: Arc<Mutex<VecDeque<Message>>>,
-    ) -> TransformerListChannel {
-        TransformerListChannel { pending, done }
-    }
-}
-
-impl MessageChannel for TransformerListChannel {
-    fn push_msg(&mut self, msg: Message) {
-        info!("[transformer channel] Message received, sending for transformation");
-        self.pending.lock().unwrap().push_back(msg);
-    }
-
-    fn get_msg(&mut self) -> Option<Message> {
-        self.done.lock().expect("Can lock queue").pop_front()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum MessageTarget {
-    Kind(String),
-    Id(String),
-}
-
-#[derive(Debug, Clone)]
-struct Message {
-    content: Vec<u8>,
-    target: MessageTarget,
-}
-
-impl Message {
-    fn new(content: Vec<u8>, target: MessageTarget) -> Message {
-        Message { content, target }
-    }
-}
-
-trait MessageTransformer {
-    fn transform(&mut self, msg: Message) -> Message;
-}
-
-struct MessageEncryptorTransformer;
-
-impl MessageEncryptorTransformer {
-    fn new() -> MessageEncryptorTransformer {
-        MessageEncryptorTransformer
-    }
-}
-
-impl MessageTransformer for MessageEncryptorTransformer {
-    fn transform(&mut self, msg: Message) -> Message {
-        let new_content = msg.content.iter().map(|c| c ^ 0xb0).collect();
-        Message::new(new_content, msg.target)
-    }
-}
-
-trait MessageReceiver {
-    fn on_message(&mut self, msg: Message);
-}
-
-enum MessageEndpointSignal {
-    Quit,
-}
-
-struct MessageEndpoint {
-    channel: Box<dyn MessageChannel + Send>,
-    receivers: HashMap<MessageTarget, Vec<Arc<Mutex<dyn MessageReceiver + Send>>>>,
-    rcv: Receiver<MessageEndpointSignal>,
-}
-
-impl MessageEndpoint {
-    fn new(
-        channel: Box<dyn MessageChannel + Send>,
-        rcv: Receiver<MessageEndpointSignal>,
-    ) -> MessageEndpoint {
-        MessageEndpoint {
-            channel,
-            receivers: HashMap::new(),
-            rcv,
-        }
-    }
-
-    fn send(&mut self, msg: Message) {
-        info!("[endpoint] new message arrived");
-        self.channel.push_msg(msg);
-    }
-
-    fn set_target(
-        &mut self,
-        target: MessageTarget,
-        receiver: Arc<Mutex<dyn MessageReceiver + Send>>,
-    ) {
-        self.receivers
-            .entry(target)
-            .or_insert(vec![])
-            .push(receiver);
-    }
-
-    fn loop_thread(&mut self) {
-        loop {
-            // TODO: MAKE THIS A NOT-BUSY-LOOP
-            if let Some(msg) = self.channel.get_msg() {
-                info!("[endpoint] [loop] new message is being transferred");
-                if let Some(receivers) = self.receivers.get(&msg.target) {
-                    for receiver in receivers {
-                        receiver.lock().unwrap().on_message(msg.clone());
-                    }
-                }
-            }
-
-            match self.rcv.recv_timeout(Duration::from_nanos(1)) {
-                Ok(MessageEndpointSignal::Quit) => break,
-                _ => {}
-            };
-        }
-    }
-}
 
 /**
  * USER LAND
