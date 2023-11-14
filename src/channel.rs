@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::message::*;
+use crate::non_block_deque::*;
 
 pub trait MessageChannel {
     fn push_msg(&mut self, msg: Message);
@@ -34,14 +35,14 @@ impl MessageChannel for InAndOutMessageChannel {
 }
 
 pub struct TransformerListChannel {
-    pending: Arc<Mutex<VecDeque<Message>>>,
-    done: Arc<Mutex<VecDeque<Message>>>,
+    pending: Arc<NonBlockDeque<Message>>,
+    done: Arc<NonBlockDeque<Message>>,
 }
 
 impl TransformerListChannel {
     pub fn new(
-        pending: Arc<Mutex<VecDeque<Message>>>,
-        done: Arc<Mutex<VecDeque<Message>>>,
+        pending: Arc<NonBlockDeque<Message>>,
+        done: Arc<NonBlockDeque<Message>>,
     ) -> TransformerListChannel {
         TransformerListChannel { pending, done }
     }
@@ -50,10 +51,10 @@ impl TransformerListChannel {
 impl MessageChannel for TransformerListChannel {
     fn push_msg(&mut self, msg: Message) {
         info!("[transformer channel] Message received, sending for transformation");
-        self.pending.lock().unwrap().push_back(msg);
+        self.pending.push(msg);
     }
 
     fn get_msg(&mut self) -> Option<Message> {
-        self.done.lock().expect("Can lock queue").pop_front()
+        self.done.pop()
     }
 }

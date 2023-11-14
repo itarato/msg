@@ -12,9 +12,11 @@ mod worker;
 use crate::channel::*;
 use crate::endpoint::*;
 use crate::message::*;
+use crate::non_block_deque::*;
 use crate::transformer::*;
 use crate::worker::*;
 
+use std::time::Duration;
 use std::{
     collections::VecDeque,
     sync::{
@@ -79,8 +81,8 @@ fn main() {
     info!("Setting up messaging components");
 
     let (tf_wrk_snd, tf_wrk_rcv) = mpsc::channel();
-    let worker_input_queue = Arc::new(Mutex::new(VecDeque::new()));
-    let worker_output_queue = Arc::new(Mutex::new(VecDeque::new()));
+    let worker_input_queue = Arc::new(NonBlockDeque::new(Duration::from_millis(10)));
+    let worker_output_queue = Arc::new(NonBlockDeque::new(Duration::from_millis(10)));
     let transform_worker = Arc::new(Mutex::new(TransformerWorker::new(
         vec![Box::new(MessageEncryptorTransformer::new())],
         tf_wrk_rcv,

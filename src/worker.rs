@@ -1,16 +1,16 @@
 use std::{
-    collections::VecDeque,
-    sync::{mpsc::Receiver, Arc, Mutex},
+    sync::{mpsc::Receiver, Arc},
     time::Duration,
 };
 
 use crate::endpoint::*;
 use crate::message::*;
+use crate::non_block_deque::*;
 use crate::transformer::*;
 
 pub struct TransformerWorker {
-    pending: Arc<Mutex<VecDeque<Message>>>,
-    done: Arc<Mutex<VecDeque<Message>>>,
+    pending: Arc<NonBlockDeque<Message>>,
+    done: Arc<NonBlockDeque<Message>>,
     transformers: Vec<Box<dyn MessageTransformer + Send>>,
     rcv: Receiver<MessageEndpointSignal>,
 }
@@ -19,8 +19,8 @@ impl TransformerWorker {
     pub fn new(
         transformers: Vec<Box<dyn MessageTransformer + Send>>,
         rcv: Receiver<MessageEndpointSignal>,
-        pending: Arc<Mutex<VecDeque<Message>>>,
-        done: Arc<Mutex<VecDeque<Message>>>,
+        pending: Arc<NonBlockDeque<Message>>,
+        done: Arc<NonBlockDeque<Message>>,
     ) -> TransformerWorker {
         TransformerWorker {
             pending,
@@ -32,21 +32,15 @@ impl TransformerWorker {
 
     pub fn work_loop(&mut self) {
         loop {
-            // TODO: MAKE THIS A NON-BUSY LOOP
-            if let Some(mut msg) = self.pending.lock().unwrap().pop_front() {
+            if let Some(mut msg) = self.pending.pop() {
                 for transformer in &mut self.transformers {
                     msg = transformer.transform(msg);
                 }
 
-                {
-                    self.done
-                        .lock()
-                        .expect("Can lock done queue")
-                        .push_back(msg);
-                }
+                self.done.push(msg);
             }
 
-            match self.rcv.recv_timeout(Duration::from_millis(10)) {
+            match self.rcv.try_recv() {
                 Ok(MessageEndpointSignal::Quit) => break,
                 _ => {}
             };
