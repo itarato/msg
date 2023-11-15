@@ -16,6 +16,7 @@ use crate::non_block_deque::*;
 use crate::transformer::*;
 use crate::worker::*;
 
+use std::rc;
 use std::time::Duration;
 use std::{
     sync::{
@@ -31,17 +32,17 @@ use std::{
  */
 
 struct UserController {
-    msg_endpoint: Arc<Mutex<MessageEndpoint>>,
+    msg_endpoint: Arc<MessageEndpoint>,
 }
 
 impl UserController {
-    fn new(msg_endpoint: Arc<Mutex<MessageEndpoint>>) -> UserController {
+    fn new(msg_endpoint: Arc<MessageEndpoint>) -> UserController {
         UserController { msg_endpoint }
     }
 
     fn save_user(&mut self) {
         info!("[user ctrl] Sending message");
-        self.msg_endpoint.lock().unwrap().send(Message::new(
+        self.msg_endpoint.send(Message::new(
             vec![0, 1, 2, 3, 4],
             MessageTarget::Kind("report".into()),
         ));
@@ -98,9 +99,15 @@ fn main() {
 
     let (snd, rcv) = mpsc::channel();
     let channel = TransformerListChannel::new(worker_input_queue, worker_output_queue);
-    let msg_endpoint = Arc::new(Mutex::new(MessageEndpoint::new(Box::new(channel), rcv)));
+    // TODO: MAKE ENDPOINTS SHARED WITHOUT MUTEX!!!
+    let msg_endpoint = Arc::new(MessageEndpoint::new(Box::new(channel)));
 
-    let thread_msg_endpoint = msg_endpoint.clone();
+    let msg_loop = thread::spawn({
+        let msg_endpoint = msg_endpoint.clone();
+        move || {
+            msg_endpoint.loop_thread(rcv);
+        }
+    });
 
     // ACTION START
 
@@ -111,11 +118,8 @@ fn main() {
     let reporter1 = Arc::new(Mutex::new(Reporter::new()));
     let reporter2 = Reporter::new();
 
-    msg_endpoint
-        .lock()
-        .unwrap()
-        .set_target(MessageTarget::Kind("report".into()), reporter1.clone());
-    msg_endpoint.lock().unwrap().set_target(
+    msg_endpoint.set_target(MessageTarget::Kind("report".into()), reporter1.clone());
+    msg_endpoint.set_target(
         MessageTarget::Kind("report".into()),
         Arc::new(Mutex::new(reporter2)),
     );
@@ -130,10 +134,6 @@ fn main() {
     info!("Artificial sleep");
 
     // ACTION END
-
-    let msg_loop = thread::spawn(move || {
-        thread_msg_endpoint.lock().unwrap().loop_thread();
-    });
 
     thread::sleep(time::Duration::from_millis(10));
 

@@ -1,33 +1,34 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::sync::Arc;
+use std::time::Duration;
 
 use crate::message::*;
 use crate::non_block_deque::*;
 
 pub trait MessageChannel {
-    fn push_msg(&mut self, msg: Message);
-    fn get_msg(&mut self) -> Option<Message>;
+    fn push_msg(&self, msg: Message);
+    fn get_msg(&self) -> Option<Message>;
 }
 
 pub struct InAndOutMessageChannel {
-    queue: VecDeque<Message>,
+    queue: NonBlockDeque<Message>,
 }
 
 impl InAndOutMessageChannel {
     pub fn new() -> InAndOutMessageChannel {
         InAndOutMessageChannel {
-            queue: VecDeque::new(),
+            queue: NonBlockDeque::new(Duration::from_millis(10)),
         }
     }
 }
 
 impl MessageChannel for InAndOutMessageChannel {
-    fn push_msg(&mut self, msg: Message) {
+    fn push_msg(&self, msg: Message) {
         info!("[channel] Message received");
-        self.queue.push_back(msg);
+        self.queue.push(msg);
     }
 
-    fn get_msg(&mut self) -> Option<Message> {
-        self.queue.pop_front()
+    fn get_msg(&self) -> Option<Message> {
+        self.queue.pop()
     }
 }
 
@@ -46,12 +47,12 @@ impl TransformerListChannel {
 }
 
 impl MessageChannel for TransformerListChannel {
-    fn push_msg(&mut self, msg: Message) {
+    fn push_msg(&self, msg: Message) {
         info!("[transformer channel] Message received, sending for transformation");
         self.pending.push(msg);
     }
 
-    fn get_msg(&mut self) -> Option<Message> {
+    fn get_msg(&self) -> Option<Message> {
         self.done.pop()
     }
 }
