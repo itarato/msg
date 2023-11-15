@@ -48,7 +48,6 @@ impl MessageEndpoint {
 
     pub fn loop_thread(&self, end_receiver: Receiver<MessageEndpointSignal>) {
         loop {
-            // TODO: MAKE THIS A NOT-BUSY-LOOP
             if let Some(msg) = self.channel.get_msg() {
                 info!("[endpoint] [loop] new message is being transferred");
                 if let Some(receivers) = self.receivers.lock().unwrap().get(&msg.target) {
@@ -58,7 +57,7 @@ impl MessageEndpoint {
                 }
             }
 
-            match end_receiver.recv_timeout(Duration::from_nanos(1)) {
+            match end_receiver.try_recv() {
                 Ok(MessageEndpointSignal::Quit) => break,
                 _ => {}
             };

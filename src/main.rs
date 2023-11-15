@@ -16,7 +16,7 @@ use crate::non_block_deque::*;
 use crate::transformer::*;
 use crate::worker::*;
 
-use std::rc;
+use std::thread::sleep;
 use std::time::Duration;
 use std::{
     sync::{
@@ -40,10 +40,10 @@ impl UserController {
         UserController { msg_endpoint }
     }
 
-    fn save_user(&mut self) {
+    fn save_user(&mut self, v: i32) {
         info!("[user ctrl] Sending message");
         self.msg_endpoint.send(Message::new(
-            vec![0, 1, 2, 3, 4],
+            vec![v, 0, 1, 2, 3, 4],
             MessageTarget::Kind("report".into()),
         ));
     }
@@ -99,7 +99,7 @@ fn main() {
 
     let (snd, rcv) = mpsc::channel();
     let channel = TransformerListChannel::new(worker_input_queue, worker_output_queue);
-    // TODO: MAKE ENDPOINTS SHARED WITHOUT MUTEX!!!
+
     let msg_endpoint = Arc::new(MessageEndpoint::new(Box::new(channel)));
 
     let msg_loop = thread::spawn({
@@ -129,12 +129,14 @@ fn main() {
 
     info!("Trigger message creation");
 
-    user_ctrl.save_user();
-
-    info!("Artificial sleep");
+    for i in 0..32 {
+        user_ctrl.save_user(i);
+        sleep(time::Duration::from_millis(10));
+    }
 
     // ACTION END
 
+    info!("Artificial sleep");
     thread::sleep(time::Duration::from_millis(10));
 
     info!("Send QUIT command to message endpoint");

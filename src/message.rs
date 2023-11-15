@@ -6,12 +6,12 @@ pub enum MessageTarget {
 
 #[derive(Debug, Clone)]
 pub struct Message {
-    pub content: Vec<u8>,
+    pub content: Vec<i32>,
     pub target: MessageTarget,
 }
 
 impl Message {
-    pub fn new(content: Vec<u8>, target: MessageTarget) -> Message {
+    pub fn new(content: Vec<i32>, target: MessageTarget) -> Message {
         Message { content, target }
     }
 }
